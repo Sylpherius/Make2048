@@ -18,7 +18,32 @@ class Grid: CCNodeColor {
     var columnHeight: CGFloat = 0
     var tileMarginVertical: CGFloat = 0
     var tileMarginHorizontal: CGFloat = 0
+    var winTile: Int = 2048
     
+    func win(){
+        return
+    }
+    func mergeTilesAtindex(x: Int, y: Int, withTileAtIndex otherX: Int, y otherY: Int) {
+        // Update game data
+        var mergedTile = gridArray[x][y]!
+        var otherTile = gridArray[otherX][otherY]!
+        
+        gridArray[x][y] = noTile
+        
+        // Update the UI
+        var otherTilePosition = positionForColumn(otherX, row: otherY)
+        var moveTo = CCActionMoveTo(duration:0.2, position: otherTilePosition)
+        var remove = CCActionRemove()
+        var mergeTile = CCActionCallBlock(block: { () -> Void in
+            otherTile.value *= 2
+            otherTile.mergedThisRound = true
+        })
+        var checkWin = CCActionCallBlock(block: { () -> Void in
+            if otherTile.value == self.winTile {self.win()}
+        })
+        var sequence = CCActionSequence(array: [moveTo, mergeTile, checkWin, remove])
+        mergedTile.runAction(sequence)
+    }
     func indexValid(x: Int, y: Int) -> Bool {
         var indexValid = true
         indexValid = (x >= 0) && (y >= 0)
@@ -30,6 +55,14 @@ class Grid: CCNodeColor {
         }
         return indexValid
     }
+    func indexValidAndUnoccupied(x: Int, y: Int) -> Bool {
+        var indexValid = self.indexValid(x, y: y)
+        if !indexValid {
+            return false
+        }
+        // unoccupied?
+        return gridArray[x][y] == noTile
+    }
     func moveTile(tile: Tile, fromX: Int, fromY: Int, toX: Int, toY: Int) {
         gridArray[toX][toY] = gridArray[fromX][fromY]
         gridArray[fromX][fromY] = noTile
@@ -38,6 +71,7 @@ class Grid: CCNodeColor {
         tile.runAction(moveTo)
     }
     func move(direction: CGPoint) {
+        var movedTilesThisRound = false
         // apply negative vector until reaching boundary, this way we get the tile that is the furthest away
         // bottom left corner
         var currentX = 0
@@ -74,19 +108,55 @@ class Grid: CCNodeColor {
                     var newY = currentY
                     // find the farthest position by iterating in direction of the vector until reaching boarding of
                     // grid or occupied cell
-                    while indexValid(newX+Int(direction.x), y: newY+Int(direction.y)) {
+                    while indexValidAndUnoccupied(newX+Int(direction.x), y: newY+Int(direction.y)) {
                         newX += Int(direction.x)
                         newY += Int(direction.y)
                     }
-                    if newX != currentX || newY != currentY {
-                        moveTile(tile, fromX: currentX, fromY: currentY, toX: newX, toY: newY)
+                    var performMove = false
+                    // If we stopped moving in vector direction, but next index in vector direction is valid, this
+                    // means the cell is occupied. Let's check if we can merge them...
+                    if indexValid(newX+Int(direction.x), y: newY+Int(direction.y)) {
+                        // get the other tile
+                        var otherTileX = newX + Int(direction.x)
+                        var otherTileY = newY + Int(direction.y)
+                        if let otherTile = gridArray[otherTileX][otherTileY] {
+                            // compare the value of other tile and also check if the other tile has been merged this round
+                            if tile.value == otherTile.value && !otherTile.mergedThisRound{
+                                mergeTilesAtindex(currentX, y: currentY, withTileAtIndex: otherTileX, y: otherTileY)
+                                movedTilesThisRound = true
+                            } else {
+                                // we cannot merge so we want to perform a move
+                                performMove = true
+                            }
+                        }
+                    } else {
+                        // we cannot merge so we want to perform a move
+                        performMove = true
                     }
-                }
+                    if performMove {
+                        // move tile to furthest position
+                        if newX != currentX || newY != currentY {
+                            // only move tile if position changed
+                            moveTile(tile, fromX: currentX, fromY: currentY, toX: newX, toY: newY)
+                            movedTilesThisRound = true
+                        }
+                    }                }
                 // move further in this column
                 currentY += yChange
             }
             currentX += xChange
             currentY = initialY
+        }
+        if movedTilesThisRound {
+            nextRound()
+        }
+    }
+    func nextRound() {
+        spawnRandomTile()
+        for column in gridArray {
+            for tile in column {
+                tile?.mergedThisRound = false
+            }
         }
     }
     func swipeLeft() {
